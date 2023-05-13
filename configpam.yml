@@ -1,0 +1,68 @@
+---
+  - name: Config PAM, time limits login and test
+    gather_facts: no
+    hosts: all
+    become: yes
+
+    tasks:
+      - name: Install needed pam package
+        ansible.builtin.apt:
+          name:
+            - libpam-script
+            - docker.io
+            - policykit-1
+          state: present
+
+      - name: Add new group for unlimited login
+        ansible.builtin.group:
+          name: timeless
+          state: present
+            
+      - name: Add test users
+        ansible.builtin.user:
+          name: "{{item}}"
+          password: "{{ '12345' | password_hash('sha512') }}"
+        loop:
+          - user1
+          - user2
+          - testadm
+
+      - name: Add users to group timeless
+        ansible.builtin.user:
+          append: yes
+          groups: timeless
+          shell: /bin/bash
+          name: "{{item}}"
+        loop:
+          - vagrant
+          - root
+          - testadm
+
+      - name: Insert call pam-script in pam.d/sshd
+        ansible.builtin.lineinfile:
+          path: /etc/pam.d/sshd
+          firstmatch: yes
+          insertafter: '@include common-auth'
+          line: 'auth required pam_script.so'
+
+      - name: Copy script to right location
+        ansible.builtin.copy:
+          src: datetest.sh
+          dest: /usr/share/libpam-script/pam_script_auth
+          mode: a+rx
+
+      - name: Add user vagrant to group docker
+        ansible.builtin.user:
+          append: yes
+          groups: docker
+          name: testadm
+
+      - name: Copy polkit rule  to right location
+        ansible.builtin.copy:
+          src: 10-systemd-auth.pkla
+          dest: /etc/polkit-1/localauthority/50-local.d
+
+      - name: Retsrt Polkit
+        ansible.builtin.systemd:
+          state: restarted
+          name: polkit
